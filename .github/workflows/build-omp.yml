@@ -76,7 +76,7 @@ jobs:
               mkdir -p artifacts
               cp "${{ matrix.binary_path }}" "artifacts/${{ matrix.asset_name }}"
               tar -C artifacts -czf "artifacts/omp-${{ matrix.target_id }}.tar.gz" "${{ matrix.asset_name }}"
-              shasum -a 256 "artifacts/omp-${{ matrix.target_id }}.tar.gz" > "artifacts/omp-${{ matrix.target_id }}.tar.gz.sha256"
+              (cd artifacts && shasum -a 256 "omp-${{ matrix.target_id }}.tar.gz" > "omp-${{ matrix.target_id }}.tar.gz.sha256")
               rm "artifacts/${{ matrix.asset_name }}"
 
          - name: Upload compiled artifact
