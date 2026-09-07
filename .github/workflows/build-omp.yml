@@ -1,0 +1,90 @@
+name: Build OMP binaries
+
+on:
+   workflow_dispatch:
+
+permissions:
+   contents: read
+
+concurrency:
+   group: build-omp-${{ github.ref }}
+   cancel-in-progress: true
+
+env:
+   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+   build:
+      name: Build ${{ matrix.target_id }} binary
+      strategy:
+         fail-fast: false
+         matrix:
+            include:
+               - os: macos-14
+                 target_id: darwin-arm64
+                 native_targets: darwin-arm64
+                 binary_path: packages/coding-agent/binaries/omp-darwin-arm64
+                 asset_name: omp-darwin-arm64
+                 smoke: true
+               - os: ubuntu-22.04
+                 target_id: linux-x64
+                 native_targets: linux-x64-baseline linux-x64-modern
+                 binary_path: packages/coding-agent/binaries/omp-linux-x64
+                 asset_name: omp-linux-x64
+                 smoke: true
+               - os: ubuntu-24.04-arm
+                 target_id: linux-arm64
+                 native_targets: linux-arm64
+                 binary_path: packages/coding-agent/binaries/omp-linux-arm64
+                 asset_name: omp-linux-arm64
+                 smoke: true
+               - os: ubuntu-22.04
+                 target_id: win32-x64
+                 native_targets: win32-x64-baseline
+                 binary_path: packages/coding-agent/binaries/omp-windows-x64.exe
+                 asset_name: omp-windows-x64.exe
+                 smoke: false
+      runs-on: ${{ matrix.os }}
+      timeout-minutes: 120
+      steps:
+         - name: Check out repository
+           uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+         - name: Install Bun and dependencies
+           uses: ./.github/actions/bun-install
+
+         - name: Build native addon
+           uses: ./.github/actions/bazel-natives
+           with:
+              targets: ${{ matrix.native_targets }}
+              cache-scope: fork-build-${{ matrix.target_id }}
+
+         - name: Build OMP binary
+           env:
+              RELEASE_TARGETS: ${{ matrix.target_id }}
+           run: bun run ci:release:build-binaries
+
+         - name: Smoke-test compiled binary
+           if: matrix.smoke
+           run: |
+              runtime_dir="$(mktemp -d)"
+              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.binary_path }}" --version
+              HOME="$runtime_dir/home" XDG_DATA_HOME="$runtime_dir/xdg" "${{ matrix.binary_path }}" --smoke-test
+
+         - name: Package binary and checksum
+           run: |
+              mkdir -p artifacts
+              cp "${{ matrix.binary_path }}" "artifacts/${{ matrix.asset_name }}"
+              tar -C artifacts -czf "artifacts/omp-${{ matrix.target_id }}.tar.gz" "${{ matrix.asset_name }}"
+              shasum -a 256 "artifacts/omp-${{ matrix.target_id }}.tar.gz" > "artifacts/omp-${{ matrix.target_id }}.tar.gz.sha256"
+              rm "artifacts/${{ matrix.asset_name }}"
+
+         - name: Upload compiled artifact
+           uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+           with:
+              name: omp-${{ matrix.target_id }}
+              path: |
+                 artifacts/omp-${{ matrix.target_id }}.tar.gz
+                 artifacts/omp-${{ matrix.target_id }}.tar.gz.sha256
+              if-no-files-found: error
+              retention-days: 14
